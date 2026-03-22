@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  horoscope-numerology-mcp:
+    build: .
+    ports:
+      - "8003:8000"
+    environment:
+      - MCP_TRANSPORT=http
+      - DIVINE_API_KEY=${DIVINE_API_KEY:-}
+      - DIVINE_AUTH_TOKEN=${DIVINE_AUTH_TOKEN:-}
+      - MCP_HOST=${MCP_HOST:-mcp.divineapi.com}
+      - MCP_JWT_SECRET=${MCP_JWT_SECRET:-}
+    restart: unless-stopped

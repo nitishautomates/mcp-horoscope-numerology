@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "divineapi-horoscope-numerology-mcp"
+version = "1.0.0"
+description = "Official MCP server for Divine API's Horoscope, Tarot, Numerology & PDF Reports"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Divine API", email = "admin@divineapi.com" },
+]
+keywords = [
+    "mcp", "horoscope", "tarot", "numerology", "divineapi",
+    "zodiac", "fortune", "prediction", "pdf-reports",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "mcp[cli]>=1.2.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "pyjwt>=2.0.0",
+]
+
+[project.optional-dependencies]
+http = [
+    "uvicorn>=0.30.0",
+    "starlette>=0.37.0",
+]
+
+[project.urls]
+Homepage = "https://divineapi.com"
+Documentation = "https://developers.divineapi.com"
+Repository = "https://github.com/DivineAPI/mcp-horoscope-numerology"
+
+[project.scripts]
+divineapi-horoscope-numerology-mcp = "divineapi_horoscope_numerology_mcp:main"
+divineapi-horoscope-numerology-mcp-http = "divineapi_horoscope_numerology_mcp:main_http"
+
+[tool.hatch.build.targets.wheel]
+packages = ["divineapi_horoscope_numerology_mcp"]
