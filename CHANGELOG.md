@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - 2026-07-08
+## [1.3.0] - 2026-07-08
 
 Param-parity fix batch for the Horoscope & Numerology server. Every change
 below was verified against the live backend with curl before coding, and every

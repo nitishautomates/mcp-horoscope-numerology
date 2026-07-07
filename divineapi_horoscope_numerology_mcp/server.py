@@ -3,7 +3,7 @@
 Divine API - Horoscope & Numerology MCP Server
 
 Official MCP server by Divine API for Horoscope, Tarot, Numerology & PDF Reports.
-Provides 62 tools for daily/weekly/monthly/yearly horoscopes, tarot readings,
+Provides 63 tools for daily/weekly/monthly/yearly horoscopes, tarot readings,
 numerology analysis, love calculators, lifestyle insights, and PDF reports.
 
 Setup:
@@ -34,6 +34,7 @@ from mcp.server.auth.provider import (
 )
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyUrl, BaseModel, Field, ConfigDict, field_validator
@@ -249,6 +250,19 @@ VALID_CHINESE_SIGNS = {
     "horse", "goat", "monkey", "rooster", "dog", "pig",
 }
 
+# Day selector used by the daily horoscope, Chinese horoscope, and lifestyle endpoints.
+VALID_H_DAYS = {"today", "tomorrow", "yesterday"}
+
+# The weekly/monthly/yearly horoscope endpoints accept ONLY these selectors
+# (verified live 2026-07-08; calendar values like '2026-03-16', '03' or '2026'
+# are rejected with "Please enter valid ... current, prev or next").
+VALID_PERIOD_SELECTORS = {"current", "prev", "next"}
+
+# Calculation methods accepted by the core-numbers endpoint (verified live 2026-07-08).
+VALID_CORE_METHODS = {"general", "chaldean", "pythagorean"}
+
+VALID_GENDERS = {"male", "female"}
+
 TOOL_ANNOTATIONS = {
     "readOnlyHint": True,
     "destructiveHint": False,
@@ -262,16 +276,17 @@ TOOL_ANNOTATIONS = {
 
 
 class HoroscopeInput(BaseModel):
-    """Input for daily horoscope API calls. Requires zodiac sign, date, and timezone."""
+    """Input for daily horoscope API calls. Requires zodiac sign, day selector, and timezone."""
 
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
     sign: str = Field(..., description="Zodiac sign (e.g., 'aries', 'taurus', 'gemini')")
-    day: str = Field(..., description="Day of the month (e.g., '21')", min_length=1, max_length=2)
-    month: str = Field(..., description="Month number (e.g., '03')", min_length=1, max_length=2)
-    year: str = Field(..., description="Year (e.g., '2026')", min_length=4, max_length=4)
+    h_day: str = Field(..., description="Day selector: 'today', 'tomorrow', or 'yesterday'")
     tzone: str = Field(..., description="Timezone offset from UTC (e.g., '5.5' for IST)")
     lan: str = Field(default="en", description="Language code for response (default 'en')")
+    day: str | None = Field(default=None, description="Deprecated: ignored by this endpoint, the reading is selected via h_day. Accepted for backward compatibility, not sent to the API.")
+    month: str | None = Field(default=None, description="Deprecated: ignored by this endpoint, the reading is selected via h_day. Accepted for backward compatibility, not sent to the API.")
+    year: str | None = Field(default=None, description="Deprecated: ignored by this endpoint, the reading is selected via h_day. Accepted for backward compatibility, not sent to the API.")
 
     @field_validator("sign")
     @classmethod
@@ -279,16 +294,24 @@ class HoroscopeInput(BaseModel):
         v = v.lower().strip()
         if v not in VALID_ZODIAC_SIGNS:
             raise ValueError(f"Invalid zodiac sign '{v}'. Must be one of: {', '.join(sorted(VALID_ZODIAC_SIGNS))}")
+        return v
+
+    @field_validator("h_day")
+    @classmethod
+    def validate_h_day(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in VALID_H_DAYS:
+            raise ValueError(f"Invalid h_day '{v}'. Must be one of: {', '.join(sorted(VALID_H_DAYS))}")
         return v
 
 
 class WeeklyHoroscopeInput(BaseModel):
-    """Input for weekly horoscope API calls. Requires zodiac sign and week start date."""
+    """Input for weekly horoscope API calls. Requires zodiac sign and week selector."""
 
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
     sign: str = Field(..., description="Zodiac sign (e.g., 'aries', 'taurus')")
-    week: str = Field(..., description="Week start date in YYYY-MM-DD format (e.g., '2026-03-16')")
+    week: str = Field(..., description="Week selector: 'current', 'prev', or 'next'. Calendar dates are not accepted by the API.")
     tzone: str = Field(..., description="Timezone offset from UTC (e.g., '5.5')")
     lan: str = Field(default="en", description="Language code for response (default 'en')")
 
@@ -298,16 +321,24 @@ class WeeklyHoroscopeInput(BaseModel):
         v = v.lower().strip()
         if v not in VALID_ZODIAC_SIGNS:
             raise ValueError(f"Invalid zodiac sign '{v}'. Must be one of: {', '.join(sorted(VALID_ZODIAC_SIGNS))}")
+        return v
+
+    @field_validator("week")
+    @classmethod
+    def validate_week(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in VALID_PERIOD_SELECTORS:
+            raise ValueError(f"Invalid week '{v}'. Must be one of: {', '.join(sorted(VALID_PERIOD_SELECTORS))}")
         return v
 
 
 class MonthlyHoroscopeInput(BaseModel):
-    """Input for monthly horoscope API calls. Requires zodiac sign and month."""
+    """Input for monthly horoscope API calls. Requires zodiac sign and month selector."""
 
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
     sign: str = Field(..., description="Zodiac sign (e.g., 'aries', 'taurus')")
-    month: str = Field(..., description="Month number (e.g., '03' for March)")
+    month: str = Field(..., description="Month selector: 'current', 'prev', or 'next'. Month numbers like '03' are not accepted by the API.")
     tzone: str = Field(..., description="Timezone offset from UTC (e.g., '5.5')")
     lan: str = Field(default="en", description="Language code for response (default 'en')")
 
@@ -319,14 +350,22 @@ class MonthlyHoroscopeInput(BaseModel):
             raise ValueError(f"Invalid zodiac sign '{v}'. Must be one of: {', '.join(sorted(VALID_ZODIAC_SIGNS))}")
         return v
 
+    @field_validator("month")
+    @classmethod
+    def validate_month(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in VALID_PERIOD_SELECTORS:
+            raise ValueError(f"Invalid month '{v}'. Must be one of: {', '.join(sorted(VALID_PERIOD_SELECTORS))}")
+        return v
+
 
 class YearlyHoroscopeInput(BaseModel):
-    """Input for yearly horoscope API calls. Requires zodiac sign and year."""
+    """Input for yearly horoscope API calls. Requires zodiac sign and year selector."""
 
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
     sign: str = Field(..., description="Zodiac sign (e.g., 'aries', 'taurus')")
-    year: str = Field(..., description="Year (e.g., '2026')", min_length=4, max_length=4)
+    year: str = Field(..., description="Year selector: 'current', 'prev', or 'next'. Calendar years like '2026' are not accepted by the API.")
     tzone: str = Field(..., description="Timezone offset from UTC (e.g., '5.5')")
     lan: str = Field(default="en", description="Language code for response (default 'en')")
 
@@ -336,6 +375,14 @@ class YearlyHoroscopeInput(BaseModel):
         v = v.lower().strip()
         if v not in VALID_ZODIAC_SIGNS:
             raise ValueError(f"Invalid zodiac sign '{v}'. Must be one of: {', '.join(sorted(VALID_ZODIAC_SIGNS))}")
+        return v
+
+    @field_validator("year")
+    @classmethod
+    def validate_year(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in VALID_PERIOD_SELECTORS:
+            raise ValueError(f"Invalid year '{v}'. Must be one of: {', '.join(sorted(VALID_PERIOD_SELECTORS))}")
         return v
 
 
@@ -372,10 +419,40 @@ class NumerologyHoroscopeInput(BaseModel):
 
 
 class TarotInput(BaseModel):
-    """Input for tarot and reading API calls. Minimal input — language only."""
+    """Input for tarot and reading API calls. Minimal input, language only."""
 
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
+    lan: str = Field(default="en", description="Language code for response (default 'en')")
+
+
+class LoveCompatibilityInput(BaseModel):
+    """Input for the love compatibility reading. Requires two zodiac signs."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    sign_1: str = Field(..., description="First person's zodiac sign (e.g., 'aries')")
+    sign_2: str = Field(..., description="Second person's zodiac sign (e.g., 'leo')")
+    lan: str = Field(default="en", description="Language code for response (default 'en')")
+
+    @field_validator("sign_1", "sign_2")
+    @classmethod
+    def validate_signs(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in VALID_ZODIAC_SIGNS:
+            raise ValueError(f"Invalid zodiac sign '{v}'. Must be one of: {', '.join(sorted(VALID_ZODIAC_SIGNS))}")
+        return v
+
+
+class WhichAnimalInput(BaseModel):
+    """Input for the spirit animal reading. Requires full name and birth date."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    full_name: str = Field(..., description="Full name of the person (e.g., 'Ram Kumar')", min_length=1, max_length=200)
+    day: str = Field(..., description="Birth day (e.g., '15')", min_length=1, max_length=2)
+    month: str = Field(..., description="Birth month (e.g., '08')", min_length=1, max_length=2)
+    year: str = Field(..., description="Birth year, 1901 to 2100 (e.g., '1990')", min_length=4, max_length=4)
     lan: str = Field(default="en", description="Language code for response (default 'en')")
 
 
@@ -392,6 +469,40 @@ class NumerologyInput(BaseModel):
     lan: str = Field(default="en", description="Language code for response (default 'en')")
 
 
+class CoreNumbersInput(BaseModel):
+    """Input for the core numbers API. Requires full name, birth date, and calculation method."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    full_name: str = Field(..., description="Full name of the person (e.g., 'Rahul Kumar')", min_length=1, max_length=200)
+    day: str = Field(..., description="Birth day (e.g., '15')", min_length=1, max_length=2)
+    month: str = Field(..., description="Birth month (e.g., '08')", min_length=1, max_length=2)
+    year: str = Field(..., description="Birth year (e.g., '1990')", min_length=4, max_length=4)
+    method: str = Field(..., description="Calculation method: 'general', 'chaldean', or 'pythagorean'")
+    gender: str | None = Field(default=None, description="Optional gender: 'male' or 'female'. Accepted by the API but does not change the result.")
+    fname: str | None = Field(default=None, description="Deprecated: this endpoint requires full_name instead. Accepted for backward compatibility, not sent to the API.")
+    lname: str | None = Field(default=None, description="Deprecated: this endpoint requires full_name instead. Accepted for backward compatibility, not sent to the API.")
+    lan: str | None = Field(default=None, description="Deprecated: not part of this endpoint's schema. Accepted for backward compatibility, not sent to the API.")
+
+    @field_validator("method")
+    @classmethod
+    def validate_method(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in VALID_CORE_METHODS:
+            raise ValueError(f"Invalid method '{v}'. Must be one of: {', '.join(sorted(VALID_CORE_METHODS))}")
+        return v
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.lower().strip()
+        if v not in VALID_GENDERS:
+            raise ValueError(f"Invalid gender '{v}'. Must be one of: {', '.join(sorted(VALID_GENDERS))}")
+        return v
+
+
 class MobileNumerologyInput(BaseModel):
     """Input for mobile number numerology analysis. Requires name, birth date, and mobile number."""
 
@@ -403,6 +514,19 @@ class MobileNumerologyInput(BaseModel):
     month: str = Field(..., description="Birth month (e.g., '06')")
     year: str = Field(..., description="Birth year (e.g., '1990')")
     mobile_number: str = Field(..., description="Mobile number to analyze (e.g., '9876543210')")
+
+
+class NewMobileNumberInput(BaseModel):
+    """Input for the new mobile number suggestion. Requires name and birth date only."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    fname: str = Field(..., description="First name", min_length=1, max_length=100)
+    lname: str = Field(..., description="Last name", min_length=1, max_length=100)
+    day: str = Field(..., description="Birth day (e.g., '15')")
+    month: str = Field(..., description="Birth month (e.g., '06')")
+    year: str = Field(..., description="Birth year (e.g., '1990')")
+    mobile_number: str | None = Field(default=None, description="Deprecated: ignored by this endpoint, the suggestion is derived from name and birth date alone. Accepted for backward compatibility, not sent to the API.")
 
 
 class CalculatorInput(BaseModel):
@@ -417,7 +541,12 @@ class CalculatorInput(BaseModel):
 
 
 class PDFReportInput(BaseModel):
-    """Input for PDF report generation. Requires birth data and optional company branding."""
+    """Input for PDF report generation. Requires birth data and company branding.
+
+    The PDF backend REQUIRES the six branding fields (company_name, company_url,
+    company_email, company_bio, logo_url, footer_text); it rejects requests
+    without them (verified live 2026-07-08). Only company_mobile is optional.
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
@@ -434,13 +563,13 @@ class PDFReportInput(BaseModel):
     lon: str = Field(..., description="Longitude of birth place (e.g., '77.1025')")
     tzone: str = Field(..., description="Timezone offset from UTC (e.g., '5.5')")
     lan: str = Field(default="en", description="Language code for report (default 'en')")
-    company_name: str = Field(default="", description="Company name for branding on PDF")
-    company_url: str = Field(default="", description="Company URL for branding on PDF")
-    company_email: str = Field(default="", description="Company email for branding on PDF")
-    company_mobile: str = Field(default="", description="Company phone for branding on PDF")
-    company_bio: str = Field(default="", description="Company bio/description for branding on PDF")
-    logo_url: str = Field(default="", description="Logo image URL for branding on PDF")
-    footer_text: str = Field(default="", description="Footer text for branding on PDF")
+    company_name: str = Field(..., description="Company name printed on the PDF (required by the API)", min_length=1)
+    company_url: str = Field(..., description="Company URL printed on the PDF (required by the API)", min_length=1)
+    company_email: str = Field(..., description="Company email printed on the PDF (required by the API)", min_length=1)
+    company_bio: str = Field(..., description="Company bio/description printed on the PDF (required by the API)", min_length=1)
+    logo_url: str = Field(..., description="Logo image URL printed on the PDF (required by the API)", min_length=1)
+    footer_text: str = Field(..., description="Footer text printed on the PDF (required by the API)", min_length=1)
+    company_mobile: str = Field(default="", description="Optional company phone for branding on PDF")
 
 
 class PDFMatchmakingInput(BaseModel):
@@ -477,13 +606,69 @@ class PDFMatchmakingInput(BaseModel):
     p2_tzone: str = Field(..., description="Timezone of person 2")
 
     lan: str = Field(default="en", description="Language code for report (default 'en')")
-    company_name: str = Field(default="", description="Company name for branding on PDF")
-    company_url: str = Field(default="", description="Company URL for branding on PDF")
-    company_email: str = Field(default="", description="Company email for branding on PDF")
-    company_mobile: str = Field(default="", description="Company phone for branding on PDF")
-    company_bio: str = Field(default="", description="Company bio/description for branding on PDF")
-    logo_url: str = Field(default="", description="Logo image URL for branding on PDF")
-    footer_text: str = Field(default="", description="Footer text for branding on PDF")
+    company_name: str = Field(..., description="Company name printed on the PDF (required by the API)", min_length=1)
+    company_url: str = Field(..., description="Company URL printed on the PDF (required by the API)", min_length=1)
+    company_email: str = Field(..., description="Company email printed on the PDF (required by the API)", min_length=1)
+    company_bio: str = Field(..., description="Company bio/description printed on the PDF (required by the API)", min_length=1)
+    logo_url: str = Field(..., description="Logo image URL printed on the PDF (required by the API)", min_length=1)
+    footer_text: str = Field(..., description="Footer text printed on the PDF (required by the API)", min_length=1)
+    company_mobile: str = Field(default="", description="Optional company phone for branding on PDF")
+
+
+class NatalReportInput(PDFReportInput):
+    """Input for the Western natal PDF report. Adds the report_code and theme selectors the API requires."""
+
+    report_code: str = Field(..., description="Report code selecting which natal report to generate (e.g., 'CAREER-REPORT'). Required by the API; see the Divine API docs for the full list of codes.")
+    theme: str = Field(..., description="Visual theme code for the PDF (e.g., '001'). Required by the API.")
+
+
+class CoupleReportInput(PDFMatchmakingInput):
+    """Input for the Western couple PDF report. Adds the report_code selector the API requires."""
+
+    report_code: str = Field(..., description="Report code selecting which couple report to generate (e.g., 'ALIGNED-ENERGIES-REPORT'). Required by the API; see the Divine API docs for the full list of codes.")
+
+
+class NumerologyPDFInput(BaseModel):
+    """Input for numerology PDF reports. Requires full name, birth date, gender, report code, and branding.
+
+    The backend requires full_name (not fname/lname), gender, report_code, and
+    the six branding fields (verified live 2026-07-08). Birth time and place are
+    optional and only sent when provided; the reports generate without them.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    full_name: str = Field(..., description="Full name of the person (e.g., 'Rahul Kumar')", min_length=1, max_length=200)
+    day: str = Field(..., description="Birth day (e.g., '15')")
+    month: str = Field(..., description="Birth month (e.g., '08')")
+    year: str = Field(..., description="Birth year (e.g., '1990')")
+    gender: str = Field(..., description="Gender: 'male' or 'female'")
+    report_code: str = Field(..., description="Report code selecting the report to generate. Required by the API. Example: 'YEARLY-PREDICTION-3-YEAR' for the prediction report, 'SCHOLARLY-SPIRITS' for the numerology report; see the Divine API docs for the full list of codes.")
+    lan: str = Field(default="en", description="Language code for report (default 'en')")
+    company_name: str = Field(..., description="Company name printed on the PDF (required by the API)", min_length=1)
+    company_url: str = Field(..., description="Company URL printed on the PDF (required by the API)", min_length=1)
+    company_email: str = Field(..., description="Company email printed on the PDF (required by the API)", min_length=1)
+    company_bio: str = Field(..., description="Company bio/description printed on the PDF (required by the API)", min_length=1)
+    logo_url: str = Field(..., description="Logo image URL printed on the PDF (required by the API)", min_length=1)
+    footer_text: str = Field(..., description="Footer text printed on the PDF (required by the API)", min_length=1)
+    company_mobile: str = Field(default="", description="Optional company phone for branding on PDF")
+    hour: str | None = Field(default=None, description="Optional birth hour in 24h format; not required for these reports, sent only if provided")
+    min: str | None = Field(default=None, description="Optional birth minute; sent only if provided")
+    sec: str | None = Field(default=None, description="Optional birth second; sent only if provided")
+    place: str | None = Field(default=None, description="Optional birth place; sent only if provided")
+    lat: str | None = Field(default=None, description="Optional latitude; sent only if provided")
+    lon: str | None = Field(default=None, description="Optional longitude; sent only if provided")
+    tzone: str | None = Field(default=None, description="Optional timezone offset; sent only if provided")
+    fname: str | None = Field(default=None, description="Deprecated: this endpoint requires full_name instead. Accepted for backward compatibility, not sent to the API.")
+    lname: str | None = Field(default=None, description="Deprecated: this endpoint requires full_name instead. Accepted for backward compatibility, not sent to the API.")
+
+    @field_validator("gender")
+    @classmethod
+    def validate_gender(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in VALID_GENDERS:
+            raise ValueError(f"Invalid gender '{v}'. Must be one of: {', '.join(sorted(VALID_GENDERS))}")
+        return v
 
 
 # ──────────────────────────────────────────────
@@ -498,7 +683,12 @@ async def _call_divine_api(
     api_key: str | None = None,
     auth_token: str | None = None,
 ) -> str:
-    """Make a POST request to Divine API and return formatted JSON response."""
+    """Make a POST request to Divine API and return formatted JSON response.
+
+    Raises ToolError on any failure (non-2xx, network error, or an upstream
+    error envelope returned with HTTP 200) so MCP clients see isError: true
+    instead of a success result whose text merely contains 'Error: ...'.
+    """
     payload["api_key"] = api_key or DIVINE_API_KEY
     clean_payload = {k: v for k, v in payload.items() if v is not None}
     url = f"{base_url}{endpoint}"
@@ -514,16 +704,26 @@ async def _call_divine_api(
             )
             response.raise_for_status()
             data = response.json()
-            return json.dumps(data, indent=2, ensure_ascii=False)
-
     except httpx.HTTPStatusError as e:
-        return _handle_http_error(e)
-    except httpx.TimeoutException:
-        return "Error: Request timed out. The Divine API server may be slow. Please try again."
-    except httpx.ConnectError:
-        return "Error: Could not connect to Divine API. Please check your internet connection."
+        raise ToolError(_handle_http_error(e)) from e
+    except httpx.TimeoutException as e:
+        raise ToolError("Request timed out. The Divine API server may be slow. Please try again.") from e
+    except httpx.ConnectError as e:
+        raise ToolError("Could not connect to Divine API. Please check your internet connection.") from e
     except Exception as e:
-        return f"Error: Unexpected error - {type(e).__name__}: {str(e)}"
+        raise ToolError(f"Unexpected error - {type(e).__name__}: {str(e)}") from e
+
+    # Some endpoints return HTTP 200 with an error envelope in the body.
+    # Two shapes are used across the Divine API hosts:
+    #   legacy (astroapi-4/5, pdf):  {"success": 2 or 3, "msg": "..."}
+    #   newer (astroapi-7):          {"status": "error", "message": "...", ...}
+    # A successful legacy response is success==1; newer success omits "success".
+    if isinstance(data, dict):
+        if data.get("status") == "error" or ("success" in data and str(data.get("success")) != "1"):
+            msg = data.get("message") or data.get("msg") or "Divine API returned an error."
+            raise ToolError(f"Divine API error: {msg}")
+
+    return json.dumps(data, indent=2, ensure_ascii=False)
 
 
 def _handle_http_error(e: httpx.HTTPStatusError) -> str:
@@ -564,11 +764,10 @@ def _handle_http_error(e: httpx.HTTPStatusError) -> str:
 
 
 def _horoscope_payload(params: HoroscopeInput) -> dict:
+    """Build the daily horoscope payload. Deprecated day/month/year inputs are NOT forwarded."""
     return {
         "sign": params.sign,
-        "day": params.day,
-        "month": params.month,
-        "year": params.year,
+        "h_day": params.h_day,
         "tzone": params.tzone,
         "lan": params.lan,
     }
@@ -649,6 +848,49 @@ def _mobile_numerology_payload(params: MobileNumerologyInput) -> dict:
     }
 
 
+def _new_mobile_number_payload(params: NewMobileNumberInput) -> dict:
+    """Build the new-mobile-number payload. The deprecated mobile_number input is NOT forwarded."""
+    return {
+        "fname": params.fname,
+        "lname": params.lname,
+        "day": params.day,
+        "month": params.month,
+        "year": params.year,
+    }
+
+
+def _love_compatibility_payload(params: LoveCompatibilityInput) -> dict:
+    return {
+        "sign_1": params.sign_1,
+        "sign_2": params.sign_2,
+        "lan": params.lan,
+    }
+
+
+def _which_animal_payload(params: WhichAnimalInput) -> dict:
+    return {
+        "full_name": params.full_name,
+        "day": params.day,
+        "month": params.month,
+        "year": params.year,
+        "lan": params.lan,
+    }
+
+
+def _core_numbers_payload(params: CoreNumbersInput) -> dict:
+    """Build the core-numbers payload. Deprecated fname/lname/lan inputs are NOT forwarded."""
+    payload = {
+        "full_name": params.full_name,
+        "day": params.day,
+        "month": params.month,
+        "year": params.year,
+        "method": params.method,
+    }
+    if params.gender:
+        payload["gender"] = params.gender
+    return payload
+
+
 def _calculator_payload(params: CalculatorInput) -> dict:
     return {
         "your_name": params.your_name,
@@ -673,21 +915,22 @@ def _pdf_report_payload(params: PDFReportInput) -> dict:
         "lon": params.lon,
         "tzone": params.tzone,
         "lan": params.lan,
+        "company_name": params.company_name,
+        "company_url": params.company_url,
+        "company_email": params.company_email,
+        "company_bio": params.company_bio,
+        "logo_url": params.logo_url,
+        "footer_text": params.footer_text,
     }
-    if params.company_name:
-        payload["company_name"] = params.company_name
-    if params.company_url:
-        payload["company_url"] = params.company_url
-    if params.company_email:
-        payload["company_email"] = params.company_email
     if params.company_mobile:
         payload["company_mobile"] = params.company_mobile
-    if params.company_bio:
-        payload["company_bio"] = params.company_bio
-    if params.logo_url:
-        payload["logo_url"] = params.logo_url
-    if params.footer_text:
-        payload["footer_text"] = params.footer_text
+    return payload
+
+
+def _natal_report_payload(params: NatalReportInput) -> dict:
+    payload = _pdf_report_payload(params)
+    payload["report_code"] = params.report_code
+    payload["theme"] = params.theme
     return payload
 
 
@@ -718,21 +961,50 @@ def _pdf_matchmaking_payload(params: PDFMatchmakingInput) -> dict:
         "p2_lon": params.p2_lon,
         "p2_tzone": params.p2_tzone,
         "lan": params.lan,
+        "company_name": params.company_name,
+        "company_url": params.company_url,
+        "company_email": params.company_email,
+        "company_bio": params.company_bio,
+        "logo_url": params.logo_url,
+        "footer_text": params.footer_text,
     }
-    if params.company_name:
-        payload["company_name"] = params.company_name
-    if params.company_url:
-        payload["company_url"] = params.company_url
-    if params.company_email:
-        payload["company_email"] = params.company_email
     if params.company_mobile:
         payload["company_mobile"] = params.company_mobile
-    if params.company_bio:
-        payload["company_bio"] = params.company_bio
-    if params.logo_url:
-        payload["logo_url"] = params.logo_url
-    if params.footer_text:
-        payload["footer_text"] = params.footer_text
+    return payload
+
+
+def _couple_report_payload(params: CoupleReportInput) -> dict:
+    payload = _pdf_matchmaking_payload(params)
+    payload["report_code"] = params.report_code
+    return payload
+
+
+def _numerology_pdf_payload(params: NumerologyPDFInput) -> dict:
+    """Build a numerology PDF payload. Deprecated fname/lname inputs are NOT forwarded.
+
+    Optional birth time/place fields are sent only when provided.
+    """
+    payload = {
+        "full_name": params.full_name,
+        "day": params.day,
+        "month": params.month,
+        "year": params.year,
+        "gender": params.gender,
+        "report_code": params.report_code,
+        "lan": params.lan,
+        "company_name": params.company_name,
+        "company_url": params.company_url,
+        "company_email": params.company_email,
+        "company_bio": params.company_bio,
+        "logo_url": params.logo_url,
+        "footer_text": params.footer_text,
+    }
+    if params.company_mobile:
+        payload["company_mobile"] = params.company_mobile
+    for key in ("hour", "min", "sec", "place", "lat", "lon", "tzone"):
+        val = getattr(params, key)
+        if val is not None:
+            payload[key] = val
     return payload
 
 
@@ -745,6 +1017,7 @@ def _pdf_matchmaking_payload(params: PDFMatchmakingInput) -> dict:
 async def divine_daily_horoscope(params: HoroscopeInput, ctx: Context) -> str:
     """Get daily horoscope for a zodiac sign. Returns love, career, health, and overall predictions.
 
+    The reading is selected with h_day ('today', 'tomorrow', or 'yesterday').
     For a broader outlook, also call divine_weekly_horoscope and divine_monthly_horoscope in parallel.
     """
     api_key, auth_token = _get_credentials(ctx)
@@ -970,14 +1243,15 @@ async def divine_know_your_friend_reading(params: TarotInput, ctx: Context) -> s
 
 
 @mcp.tool(name="divine_love_compatibility", annotations=TOOL_ANNOTATIONS)
-async def divine_love_compatibility(params: TarotInput, ctx: Context) -> str:
-    """Check love compatibility between two people using tarot.
+async def divine_love_compatibility(params: LoveCompatibilityInput, ctx: Context) -> str:
+    """Check love compatibility between two zodiac signs.
 
-    Returns a compatibility reading with insights on emotional harmony,
-    challenges, and the overall potential of a romantic pairing.
+    Requires the two signs (sign_1 and sign_2). Returns a compatibility reading
+    with insights on emotional harmony, challenges, and the overall potential
+    of the romantic pairing.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/api/v2/love-compatibility", _tarot_payload(params), API_HOST_5, api_key=api_key, auth_token=auth_token)
+    return await _call_divine_api("/api/v2/love-compatibility", _love_compatibility_payload(params), API_HOST_5, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_love_triangle_reading", annotations=TOOL_ANNOTATIONS)
@@ -1036,14 +1310,15 @@ async def divine_past_present_future(params: TarotInput, ctx: Context) -> str:
 
 
 @mcp.tool(name="divine_which_animal_are_you", annotations=TOOL_ANNOTATIONS)
-async def divine_which_animal_are_you(params: TarotInput, ctx: Context) -> str:
+async def divine_which_animal_are_you(params: WhichAnimalInput, ctx: Context) -> str:
     """Discover your spirit animal through a divination reading.
 
-    Returns your spirit animal match along with its symbolic meaning,
-    personality traits, and spiritual guidance it offers.
+    Requires full name and birth date (year 1901 to 2100). Returns your spirit
+    animal match along with its symbolic meaning, personality traits, and
+    spiritual guidance it offers.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/api/v2/which-animal-are-you-reading", _tarot_payload(params), API_HOST_5, api_key=api_key, auth_token=auth_token)
+    return await _call_divine_api("/api/v2/which-animal-are-you-reading", _which_animal_payload(params), API_HOST_5, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_wisdom_reading", annotations=TOOL_ANNOTATIONS)
@@ -1201,14 +1476,15 @@ async def divine_numerology_gemstones(params: NumerologyInput, ctx: Context) -> 
 
 
 @mcp.tool(name="divine_core_numbers", annotations=TOOL_ANNOTATIONS)
-async def divine_core_numbers(params: NumerologyInput, ctx: Context) -> str:
-    """Calculate all core numerology numbers from name and birth date.
+async def divine_core_numbers(params: CoreNumbersInput, ctx: Context) -> str:
+    """Calculate all core numerology numbers from full name and birth date.
 
-    Returns the five core numbers: Life Path, Expression, Soul Urge,
-    Personality, and Birthday numbers with detailed interpretations.
+    Requires full_name and a calculation method ('general', 'chaldean', or
+    'pythagorean'). Returns the core numbers: Life Path, Destiny Path,
+    Birth Day, Attitude, Pinnacles, Challenges, and more, with interpretations.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/numerology/v1/core-numbers", _numerology_payload(params), API_HOST_4, api_key=api_key, auth_token=auth_token)
+    return await _call_divine_api("/numerology/v1/core-numbers", _core_numbers_payload(params), API_HOST_4, api_key=api_key, auth_token=auth_token)
 
 
 # ══════════════════════════════════════════════
@@ -1217,14 +1493,15 @@ async def divine_core_numbers(params: NumerologyInput, ctx: Context) -> str:
 
 
 @mcp.tool(name="divine_new_mobile_number", annotations=TOOL_ANNOTATIONS)
-async def divine_new_mobile_number(params: MobileNumerologyInput, ctx: Context) -> str:
+async def divine_new_mobile_number(params: NewMobileNumberInput, ctx: Context) -> str:
     """Get a numerologically favorable new mobile number suggestion.
 
     Analyzes your name and birth date to suggest mobile numbers
     that are numerologically aligned with your personal vibrations.
+    No existing mobile number is needed.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/numerology/v1/new-mobile-number", _mobile_numerology_payload(params), API_HOST_7, api_key=api_key, auth_token=auth_token)
+    return await _call_divine_api("/numerology/v1/new-mobile-number", _new_mobile_number_payload(params), API_HOST_7, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_analyze_mobile_number", annotations=TOOL_ANNOTATIONS)
@@ -1245,7 +1522,7 @@ async def divine_analyze_mobile_number(params: MobileNumerologyInput, ctx: Conte
 
 @mcp.tool(name="divine_flames_calculator", annotations=TOOL_ANNOTATIONS)
 async def divine_flames_calculator(
-    full_name: str,
+    your_name: str,
     partner_name: str,
     ctx: Context,
 ) -> str:
@@ -1255,7 +1532,7 @@ async def divine_flames_calculator(
     Returns the relationship type based on name analysis.
     """
     api_key, auth_token = _get_credentials(ctx)
-    payload = {"full_name": full_name, "partner_name": partner_name}
+    payload = {"your_name": your_name, "partner_name": partner_name}
     return await _call_divine_api("/calculator/v1/flames-calculator", payload, API_HOST_7, api_key=api_key, auth_token=auth_token)
 
 
@@ -1278,48 +1555,66 @@ async def divine_love_calculator(params: CalculatorInput, ctx: Context) -> str:
 @mcp.tool(name="divine_zodiac_gift_guru", annotations=TOOL_ANNOTATIONS)
 async def divine_zodiac_gift_guru(
     sign: str,
+    h_day: str,
+    tzone: str,
     ctx: Context,
     lan: str = "en",
 ) -> str:
     """Get personalized gift suggestions based on zodiac sign.
 
-    Returns curated gift ideas tailored to the personality traits
+    Requires h_day ('today', 'tomorrow', or 'yesterday') and a timezone offset
+    (e.g., '5.5'). Returns curated gift ideas tailored to the personality traits
     and preferences associated with the given zodiac sign.
     """
+    h_day = h_day.lower().strip()
+    if h_day not in VALID_H_DAYS:
+        return f"Error: Invalid h_day '{h_day}'. Must be one of: {', '.join(sorted(VALID_H_DAYS))}"
     api_key, auth_token = _get_credentials(ctx)
-    payload = {"sign": sign, "lan": lan}
+    payload = {"sign": sign, "h_day": h_day, "tzone": tzone, "lan": lan}
     return await _call_divine_api("/api/v1/zodiac-gift-guru", payload, API_HOST_7, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_beauty_by_stars", annotations=TOOL_ANNOTATIONS)
 async def divine_beauty_by_stars(
     sign: str,
+    h_day: str,
+    tzone: str,
     ctx: Context,
     lan: str = "en",
 ) -> str:
     """Get beauty and skincare tips based on zodiac sign.
 
-    Returns personalized beauty recommendations, skincare routines,
-    and wellness advice aligned with your zodiac sign traits.
+    Requires h_day ('today', 'tomorrow', or 'yesterday') and a timezone offset
+    (e.g., '5.5'). Returns personalized beauty recommendations, skincare
+    routines, and wellness advice aligned with your zodiac sign traits.
     """
+    h_day = h_day.lower().strip()
+    if h_day not in VALID_H_DAYS:
+        return f"Error: Invalid h_day '{h_day}'. Must be one of: {', '.join(sorted(VALID_H_DAYS))}"
     api_key, auth_token = _get_credentials(ctx)
-    payload = {"sign": sign, "lan": lan}
+    payload = {"sign": sign, "h_day": h_day, "tzone": tzone, "lan": lan}
     return await _call_divine_api("/api/v1/beauty-by-the-stars", payload, API_HOST_7, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_astro_chic_picks", annotations=TOOL_ANNOTATIONS)
 async def divine_astro_chic_picks(
     sign: str,
+    h_day: str,
+    tzone: str,
     ctx: Context,
     lan: str = "en",
 ) -> str:
     """Get fashion and style recommendations based on zodiac sign.
 
-    Returns trendy fashion picks, style advice, and wardrobe suggestions
-    personalized to the aesthetic preferences of your zodiac sign.
+    Requires h_day ('today', 'tomorrow', or 'yesterday') and a timezone offset
+    (e.g., '5.5'). Returns trendy fashion picks, style advice, and wardrobe
+    suggestions personalized to the aesthetic preferences of your zodiac sign.
     """
+    h_day = h_day.lower().strip()
+    if h_day not in VALID_H_DAYS:
+        return f"Error: Invalid h_day '{h_day}'. Must be one of: {', '.join(sorted(VALID_H_DAYS))}"
     api_key, auth_token = _get_credentials(ctx)
-    payload = {"sign": sign, "lan": lan}
+    payload = {"sign": sign, "h_day": h_day, "tzone": tzone, "lan": lan}
     return await _call_divine_api("/api/v1/astro-chic-picks", payload, API_HOST_7, api_key=api_key, auth_token=auth_token)
 
 
@@ -1429,118 +1724,140 @@ async def divine_pdf_vedic_15year(params: PDFReportInput, ctx: Context) -> str:
 
 
 # ══════════════════════════════════════════════
-# PDF REPORTS — WESTERN & NUMEROLOGY (4) — pdf.divineapi.com
+# PDF REPORTS — WESTERN & NUMEROLOGY (5) — pdf.divineapi.com
 # ══════════════════════════════════════════════
 
 
 @mcp.tool(name="divine_pdf_natal_report", annotations=TOOL_ANNOTATIONS)
-async def divine_pdf_natal_report(params: PDFReportInput, ctx: Context) -> str:
+async def divine_pdf_natal_report(params: NatalReportInput, ctx: Context) -> str:
     """Generate a Western astrology natal chart PDF report.
 
-    Returns a comprehensive natal chart report based on Western astrology,
-    including sun/moon/rising signs, planetary aspects, and house placements.
+    Requires a report_code (e.g., 'CAREER-REPORT') and theme (e.g., '001') in
+    addition to birth data and branding. Returns a comprehensive natal chart
+    report based on Western astrology, including sun/moon/rising signs,
+    planetary aspects, and house placements.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/astrology/v2/report", _pdf_report_payload(params), API_HOST_PDF, api_key=api_key, auth_token=auth_token)
+    return await _call_divine_api("/astrology/v2/report", _natal_report_payload(params), API_HOST_PDF, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_pdf_couple_report", annotations=TOOL_ANNOTATIONS)
-async def divine_pdf_couple_report(params: PDFMatchmakingInput, ctx: Context) -> str:
+async def divine_pdf_couple_report(params: CoupleReportInput, ctx: Context) -> str:
     """Generate a Western astrology couple compatibility PDF report.
 
-    Returns a detailed synastry report for two people including planetary
-    aspects, composite chart analysis, and relationship compatibility insights.
+    Requires a report_code (e.g., 'ALIGNED-ENERGIES-REPORT') in addition to the
+    two persons' birth data and branding. Returns a detailed synastry report
+    for two people including planetary aspects, composite chart analysis, and
+    relationship compatibility insights.
     """
     api_key, auth_token = _get_credentials(ctx)
-    return await _call_divine_api("/astrology/v1/couple", _pdf_matchmaking_payload(params), API_HOST_PDF, api_key=api_key, auth_token=auth_token)
+    return await _call_divine_api("/astrology/v1/couple", _couple_report_payload(params), API_HOST_PDF, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_pdf_numerology_prediction", annotations=TOOL_ANNOTATIONS)
-async def divine_pdf_numerology_prediction(
-    fname: str,
-    lname: str,
-    day: str,
-    month: str,
-    year: str,
-    ctx: Context,
-    lan: str = "en",
-    company_name: str = "",
-    company_url: str = "",
-    company_email: str = "",
-    company_mobile: str = "",
-    company_bio: str = "",
-    logo_url: str = "",
-    footer_text: str = "",
-) -> str:
+async def divine_pdf_numerology_prediction(params: NumerologyPDFInput, ctx: Context) -> str:
     """Generate a numerology prediction PDF report.
 
-    Returns a comprehensive numerology prediction report with life path analysis,
-    personal year forecasts, and detailed number interpretations in PDF format.
+    Requires full_name, gender, a report_code (e.g., 'YEARLY-PREDICTION-3-YEAR'),
+    and branding. Returns a comprehensive numerology prediction report with life
+    path analysis, personal year forecasts, and detailed number interpretations
+    in PDF format.
     """
     api_key, auth_token = _get_credentials(ctx)
-    payload = {
-        "fname": fname, "lname": lname,
-        "day": day, "month": month, "year": year, "lan": lan,
-    }
-    if company_name:
-        payload["company_name"] = company_name
-    if company_url:
-        payload["company_url"] = company_url
-    if company_email:
-        payload["company_email"] = company_email
-    if company_mobile:
-        payload["company_mobile"] = company_mobile
-    if company_bio:
-        payload["company_bio"] = company_bio
-    if logo_url:
-        payload["logo_url"] = logo_url
-    if footer_text:
-        payload["footer_text"] = footer_text
-    return await _call_divine_api("/numerology/v1/prediction_reports", payload, API_HOST_PDF, api_key=api_key, auth_token=auth_token)
+    return await _call_divine_api("/numerology/v1/prediction_reports", _numerology_pdf_payload(params), API_HOST_PDF, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_pdf_numerology_report", annotations=TOOL_ANNOTATIONS)
-async def divine_pdf_numerology_report(
-    fname: str,
-    lname: str,
-    day: str,
-    month: str,
-    year: str,
-    ctx: Context,
-    lan: str = "en",
-    company_name: str = "",
-    company_url: str = "",
-    company_email: str = "",
-    company_mobile: str = "",
-    company_bio: str = "",
-    logo_url: str = "",
-    footer_text: str = "",
-) -> str:
+async def divine_pdf_numerology_report(params: NumerologyPDFInput, ctx: Context) -> str:
     """Generate a full numerology analysis PDF report.
 
-    Returns a detailed numerology report covering all core numbers, Lo Shu Grid,
-    name analysis, and comprehensive life path interpretations in PDF format.
+    Requires full_name, gender, a report_code (e.g., 'SCHOLARLY-SPIRITS'), and
+    branding. Returns a detailed numerology report covering all core numbers,
+    Lo Shu Grid, name analysis, and comprehensive life path interpretations in
+    PDF format.
+    """
+    api_key, auth_token = _get_credentials(ctx)
+    return await _call_divine_api("/numerology/v2/report", _numerology_pdf_payload(params), API_HOST_PDF, api_key=api_key, auth_token=auth_token)
+
+
+async def _call_reports_v2(payload: dict, api_key: str, auth_token: str) -> str:
+    """POST to the Reports V2 endpoint, which uses a JSON body and an x-api-key header.
+
+    Unlike every other Divine API endpoint (form fields + api_key field), Reports V2
+    rejects form-encoded requests with 401 'x-api-key header required'
+    (verified live 2026-07-08). Raises ToolError on any failure.
+    """
+    url = f"{API_HOST_PDF}/api/v1/reports/generate"
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {auth_token}",
+                    "x-api-key": api_key,
+                },
+                json=payload,
+                timeout=120.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPStatusError as e:
+        raise ToolError(_handle_http_error(e)) from e
+    except httpx.TimeoutException as e:
+        raise ToolError("Request timed out. The Divine API server may be slow. Please try again.") from e
+    except httpx.ConnectError as e:
+        raise ToolError("Could not connect to Divine API. Please check your internet connection.") from e
+    except Exception as e:
+        raise ToolError(f"Unexpected error - {type(e).__name__}: {str(e)}") from e
+
+    if isinstance(data, dict) and data.get("error"):
+        raise ToolError(f"Divine API error: {data.get('error')}")
+    return json.dumps(data, indent=2, ensure_ascii=False)
+
+
+@mcp.tool(name="divine_pdf_reports_v2", annotations=TOOL_ANNOTATIONS)
+async def divine_pdf_reports_v2(
+    report_type: str = Field(..., description="Report type (e.g., 'vedic-career-report', 'vedic-marriage-report', 'western-natal-report', 'numerology-report')"),
+    full_name: str = Field(..., description="Full name of the person"),
+    day: str = Field(..., description="Birth day (e.g., '15')"),
+    month: str = Field(..., description="Birth month (e.g., '06')"),
+    year: str = Field(..., description="Birth year (e.g., '1990')"),
+    hour: str = Field(..., description="Birth hour in 24h format (e.g., '14')"),
+    min: str = Field(..., description="Birth minute (e.g., '30')"),
+    sec: str = Field(default="0", description="Birth second"),
+    gender: str = Field(..., description="Gender: 'male' or 'female'"),
+    place: str = Field(..., description="Birth place (e.g., 'New Delhi')"),
+    lat: str = Field(..., description="Latitude (e.g., '28.6139')"),
+    lon: str = Field(..., description="Longitude (e.g., '77.2090')"),
+    tzone: str = Field(..., description="Timezone offset (e.g., '5.5')"),
+    company_name: str = Field(..., description="Company name printed on the report (required by the API)"),
+    company_url: str = Field(..., description="Company URL printed on the report (required by the API)"),
+    company_email: str = Field(..., description="Company email printed on the report (required by the API)"),
+    company_mobile: str = Field(..., description="Company mobile printed on the report (required by the API)"),
+    company_bio: str = Field(..., description="Company bio printed on the report (required by the API)"),
+    footer_text: str = Field(..., description="Footer text printed on the report (required by the API)"),
+    logo_url: str = Field(..., description="Logo image URL printed on the report (required by the API)"),
+    ctx: Context = None,
+) -> str:
+    """Generate a comprehensive PDF report using Divine API Reports V2.
+
+    Supports multiple report types including vedic career, marriage, health,
+    western natal, and numerology reports. All seven branding fields are
+    required by this endpoint. Returns URLs to the generated report
+    (reportId, htmlUrl, pdfUrl, statusUrl).
     """
     api_key, auth_token = _get_credentials(ctx)
     payload = {
-        "fname": fname, "lname": lname,
-        "day": day, "month": month, "year": year, "lan": lan,
+        "report_type": report_type, "full_name": full_name,
+        "day": day, "month": month, "year": year,
+        "hour": hour, "min": min, "sec": sec, "gender": gender,
+        "place": place, "lat": lat, "lon": lon, "tzone": tzone,
+        "company_name": company_name, "company_url": company_url,
+        "company_email": company_email, "company_mobile": company_mobile,
+        "company_bio": company_bio, "footer_text": footer_text,
+        "logo_url": logo_url,
     }
-    if company_name:
-        payload["company_name"] = company_name
-    if company_url:
-        payload["company_url"] = company_url
-    if company_email:
-        payload["company_email"] = company_email
-    if company_mobile:
-        payload["company_mobile"] = company_mobile
-    if company_bio:
-        payload["company_bio"] = company_bio
-    if logo_url:
-        payload["logo_url"] = logo_url
-    if footer_text:
-        payload["footer_text"] = footer_text
-    return await _call_divine_api("/numerology/v2/report", payload, API_HOST_PDF, api_key=api_key, auth_token=auth_token)
+    return await _call_reports_v2(payload, api_key, auth_token)
 
 
 # ──────────────────────────────────────────────
@@ -1648,6 +1965,36 @@ if _TRANSPORT == "http":
 # ──────────────────────────────────────────────
 
 
+
+
+class ApiKeyToJwtMiddleware:
+    """ASGI middleware that converts X-Divine-Api-Key/Token headers into a JWT Bearer token."""
+
+    def __init__(self, app, jwt_secret):
+        self.app = app
+        self.jwt_secret = jwt_secret
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers_list = scope.get("headers", [])
+            headers_dict = {k: v for k, v in headers_list}
+            api_key = headers_dict.get(b"x-divine-api-key", b"").decode()
+            auth_token = headers_dict.get(b"x-divine-auth-token", b"").decode()
+            has_bearer = any(
+                v.startswith(b"Bearer ") for k, v in headers_list if k == b"authorization"
+            )
+            if api_key and auth_token and not has_bearer:
+                token = jwt.encode(
+                    {"divine_api_key": api_key, "divine_auth_token": auth_token,
+                     "exp": int(time.time()) + 3600, "iat": int(time.time())},
+                    self.jwt_secret, algorithm="HS256",
+                )
+                new_headers = [(k, v) for k, v in headers_list if k != b"authorization"]
+                new_headers.append((b"authorization", f"Bearer {token}".encode()))
+                scope = dict(scope, headers=new_headers)
+        await self.app(scope, receive, send)
+
+
 def create_http_app():
     """Create ASGI app for production HTTP deployment with uvicorn."""
     from starlette.middleware.cors import CORSMiddleware
@@ -1667,7 +2014,7 @@ def create_http_app():
         ],
         expose_headers=["mcp-session-id"],
     )
-    return app
+    return ApiKeyToJwtMiddleware(app, _JWT_SECRET)
 
 
 # Module-level ASGI app for uvicorn (only created in HTTP mode)
