@@ -1968,11 +1968,32 @@ if _TRANSPORT == "http":
 
 
 class ApiKeyToJwtMiddleware:
-    """ASGI middleware that converts X-Divine-Api-Key/Token headers into a JWT Bearer token."""
+    """ASGI middleware that converts direct DivineAPI credentials into the JWT
+    Bearer token the MCP auth layer expects. Two client shapes are supported:
+
+    1. X-Divine-Api-Key + X-Divine-Auth-Token headers (VS Code, OpenAI, Gemini,
+       custom clients).
+    2. Authorization: Bearer <api_key>:<auth_token> - a single-field credential
+       combo for platforms that cannot send custom headers (e.g. the Claude
+       Messages API MCP connector). A real OAuth-issued JWT never contains a
+       colon, so valid tokens are never touched.
+    """
 
     def __init__(self, app, jwt_secret):
         self.app = app
         self.jwt_secret = jwt_secret
+
+    def _mint(self, api_key, auth_token):
+        return jwt.encode(
+            {
+                "divine_api_key": api_key,
+                "divine_auth_token": auth_token,
+                "exp": int(time.time()) + 3600,
+                "iat": int(time.time()),
+            },
+            self.jwt_secret,
+            algorithm="HS256",
+        )
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
@@ -1980,18 +2001,25 @@ class ApiKeyToJwtMiddleware:
             headers_dict = {k: v for k, v in headers_list}
             api_key = headers_dict.get(b"x-divine-api-key", b"").decode()
             auth_token = headers_dict.get(b"x-divine-auth-token", b"").decode()
-            has_bearer = any(
-                v.startswith(b"Bearer ") for k, v in headers_list if k == b"authorization"
-            )
-            if api_key and auth_token and not has_bearer:
-                token = jwt.encode(
-                    {"divine_api_key": api_key, "divine_auth_token": auth_token,
-                     "exp": int(time.time()) + 3600, "iat": int(time.time())},
-                    self.jwt_secret, algorithm="HS256",
-                )
+            bearer = ""
+            for k, v in headers_list:
+                if k == b"authorization" and v.startswith(b"Bearer "):
+                    bearer = v[7:].decode()
+                    break
+
+            token = None
+            if api_key and auth_token and not bearer:
+                token = self._mint(api_key, auth_token)
+            elif ":" in bearer:
+                combo_key, _, combo_token = bearer.partition(":")
+                if combo_key and combo_token:
+                    token = self._mint(combo_key.strip(), combo_token.strip())
+
+            if token:
                 new_headers = [(k, v) for k, v in headers_list if k != b"authorization"]
                 new_headers.append((b"authorization", f"Bearer {token}".encode()))
                 scope = dict(scope, headers=new_headers)
+
         await self.app(scope, receive, send)
 
 
