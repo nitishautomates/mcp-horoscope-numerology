@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.0] - 2026-07-08
+
+### Added
+
+**Single-token authentication: `Authorization: Bearer <api_key>:<auth_token>`.**
+For platforms that can send only one credential field and no custom headers
+(e.g. the Claude Messages API MCP connector). The middleware splits the value
+on the first colon and converts it to the internal JWT, exactly like the
+X-Divine header pair. Real OAuth JWTs never contain a colon and pass through
+untouched. Existing auth methods are unchanged.
+
 ## [1.3.0] - 2026-07-08
 
 Param-parity fix batch for the Horoscope & Numerology server. Every change
