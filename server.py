@@ -1644,8 +1644,79 @@ if _TRANSPORT == "http":
 
 
 # ──────────────────────────────────────────────
+
+
+@mcp.tool(name="divine_pdf_reports_v2", annotations=TOOL_ANNOTATIONS)
+async def divine_pdf_reports_v2(
+    report_type: str = Field(..., description="Report type (e.g., 'vedic-career-report', 'vedic-marriage-report', 'western-natal-report', 'numerology-report')"),
+    full_name: str = Field(..., description="Full name of the person"),
+    day: str = Field(..., description="Birth day (e.g., '15')"),
+    month: str = Field(..., description="Birth month (e.g., '06')"),
+    year: str = Field(..., description="Birth year (e.g., '1990')"),
+    hour: str = Field(..., description="Birth hour in 24h format (e.g., '14')"),
+    min: str = Field(..., description="Birth minute (e.g., '30')"),
+    sec: str = Field(default="0", description="Birth second"),
+    gender: str = Field(..., description="Gender: 'male' or 'female'"),
+    place: str = Field(..., description="Birth place (e.g., 'New Delhi')"),
+    lat: str = Field(..., description="Latitude (e.g., '28.6139')"),
+    lon: str = Field(..., description="Longitude (e.g., '77.2090')"),
+    tzone: str = Field(..., description="Timezone offset (e.g., '5.5')"),
+    company_name: str = Field(default="", description="Company name for branding on report"),
+    company_url: str = Field(default="", description="Company URL for branding"),
+    company_email: str = Field(default="", description="Company email for branding"),
+    company_mobile: str = Field(default="", description="Company mobile for branding"),
+    company_bio: str = Field(default="", description="Company bio for branding"),
+    ctx: Context = None,
+) -> str:
+    """Generate a comprehensive PDF report using Divine API Reports V2.
+
+    Supports multiple report types including vedic career, marriage, health,
+    western natal, and numerology reports. Returns a URL to the generated PDF.
+    """
+    api_key, auth_token = _get_credentials(ctx)
+    payload = {
+        "report_type": report_type, "full_name": full_name,
+        "day": day, "month": month, "year": year,
+        "hour": hour, "min": min, "sec": sec, "gender": gender,
+        "place": place, "lat": lat, "lon": lon, "tzone": tzone,
+        "company_name": company_name, "company_url": company_url,
+        "company_email": company_email, "company_mobile": company_mobile,
+        "company_bio": company_bio,
+    }
+    return await _call_divine_api("/api/v1/reports/generate", payload, API_HOST_PDF, api_key=api_key, auth_token=auth_token)
+
 # HTTP / ASGI App
 # ──────────────────────────────────────────────
+
+
+
+
+class ApiKeyToJwtMiddleware:
+    """ASGI middleware that converts X-Divine-Api-Key/Token headers into a JWT Bearer token."""
+
+    def __init__(self, app, jwt_secret):
+        self.app = app
+        self.jwt_secret = jwt_secret
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers_list = scope.get("headers", [])
+            headers_dict = {k: v for k, v in headers_list}
+            api_key = headers_dict.get(b"x-divine-api-key", b"").decode()
+            auth_token = headers_dict.get(b"x-divine-auth-token", b"").decode()
+            has_bearer = any(
+                v.startswith(b"Bearer ") for k, v in headers_list if k == b"authorization"
+            )
+            if api_key and auth_token and not has_bearer:
+                token = jwt.encode(
+                    {"divine_api_key": api_key, "divine_auth_token": auth_token,
+                     "exp": int(time.time()) + 3600, "iat": int(time.time())},
+                    self.jwt_secret, algorithm="HS256",
+                )
+                new_headers = [(k, v) for k, v in headers_list if k != b"authorization"]
+                new_headers.append((b"authorization", f"Bearer {token}".encode()))
+                scope = dict(scope, headers=new_headers)
+        await self.app(scope, receive, send)
 
 
 def create_http_app():
@@ -1667,7 +1738,7 @@ def create_http_app():
         ],
         expose_headers=["mcp-session-id"],
     )
-    return app
+    return ApiKeyToJwtMiddleware(app, _JWT_SECRET)
 
 
 # Module-level ASGI app for uvicorn (only created in HTTP mode)
