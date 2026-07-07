@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.1] - 2026-07-08
+
+### Fixed
+
+**OAuth: clients registered without a scope are no longer rejected when they
+request one.** The metadata advertises scope "astrology", so spec-following
+connectors (e.g. ChatGPT) may request it even when their dynamic client
+registration omitted it; registration now defaults the client scope to
+"astrology" (default_scopes). Verified against the full simulated connector
+flow: discovery, registration, PKCE authorize, login, token exchange.
+
 ## [1.4.0] - 2026-07-08
 
 ### Added
