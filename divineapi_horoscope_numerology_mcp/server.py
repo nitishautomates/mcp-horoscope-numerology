@@ -173,6 +173,7 @@ if _TRANSPORT == "http":
         client_registration_options=ClientRegistrationOptions(
             enabled=True,
             valid_scopes=["astrology"],
+            default_scopes=["astrology"],
         ),
         revocation_options=RevocationOptions(enabled=True),
         required_scopes=[],
