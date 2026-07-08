@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.divineapi/horoscope",
+  "title": "Divine API - Horoscope, Tarot & Numerology",
+  "description": "Official Divine API MCP for Horoscope, Tarot, Numerology, and PDF Reports.",
+  "version": "1.4.1",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.divineapi.com/horoscope/mcp",
+      "headers": [
+        {
+          "name": "X-Divine-Api-Key",
+          "description": "Your Divine API key. Get it at https://divineapi.com/api-keys",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "X-Divine-Auth-Token",
+          "description": "Your Divine API auth (bearer) token. Get it at https://divineapi.com/api-keys",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
