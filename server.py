@@ -179,8 +179,17 @@ if _TRANSPORT == "http":
         required_scopes=[],
     )
 
+_SERVER_INSTRUCTIONS = """DivineAPI Horoscope, Tarot, Numerology, and PDF reports.
+
+Input conventions: zodiac signs are lowercase (e.g. aries). Daily horoscope and lifestyle tools use h_day = today, tomorrow, or yesterday; weekly, monthly, and yearly tools use current, prev, or next (not calendar dates). tzone is a decimal UTC offset. Numerology tools take full_name plus the birth date.
+
+PDF reports: report tools require a report_code plus six company branding fields (company_url, logo_url, footer_text, company_name, company_email, company_bio); the natal PDF also needs a theme.
+
+Output: failures come back as errors with the accepted values listed, so on a validation error, correct the input and retry."""
+
 mcp = FastMCP(
     "divineapi_horoscope_numerology_mcp",
+    instructions=_SERVER_INSTRUCTIONS,
     stateless_http=(_TRANSPORT == "http"),
     transport_security=_transport_security,
     auth=_auth_settings,

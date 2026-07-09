@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.2] - 2026-07-08
+
+### Added
+
+Add server-level instructions (how-to-use note read at connect: sign casing, h_day / current-prev-next selectors, PDF branding).
+
 ## [1.4.1] - 2026-07-08
 
 ### Fixed
