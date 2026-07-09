@@ -3,7 +3,7 @@
   "name": "com.divineapi/horoscope",
   "title": "Divine API - Horoscope, Tarot & Numerology",
   "description": "Official Divine API MCP for Horoscope, Tarot, Numerology, and PDF Reports.",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "remotes": [
     {
       "type": "streamable-http",
