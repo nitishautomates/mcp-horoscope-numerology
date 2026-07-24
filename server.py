@@ -513,6 +513,24 @@ class CoreNumbersInput(BaseModel):
         return v
 
 
+class NameCorrectionInput(BaseModel):
+    """Input for the name-correction API. Requires full name and birth date.
+
+    Unlike the fname/lname Chaldean tools, this endpoint takes a single
+    full_name (verified live: fname/lname returns HTTP 422).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    full_name: str = Field(..., description="Full name of the person (e.g., 'Rahul Kumar')", min_length=1, max_length=200)
+    day: str = Field(..., description="Birth day (e.g., '15')", min_length=1, max_length=2)
+    month: str = Field(..., description="Birth month (e.g., '08')", min_length=1, max_length=2)
+    year: str = Field(..., description="Birth year (e.g., '1990')", min_length=4, max_length=4)
+    lan: str = Field(default="en", description="Language code for response, 'en' or 'hi' (default 'en')")
+    fname: str | None = Field(default=None, description="Deprecated: this endpoint requires full_name instead. Accepted for backward compatibility, not sent to the API.")
+    lname: str | None = Field(default=None, description="Deprecated: this endpoint requires full_name instead. Accepted for backward compatibility, not sent to the API.")
+
+
 class MobileNumerologyInput(BaseModel):
     """Input for mobile number numerology analysis. Requires name, birth date, and mobile number."""
 
@@ -878,6 +896,17 @@ def _love_compatibility_payload(params: LoveCompatibilityInput) -> dict:
 
 
 def _which_animal_payload(params: WhichAnimalInput) -> dict:
+    return {
+        "full_name": params.full_name,
+        "day": params.day,
+        "month": params.month,
+        "year": params.year,
+        "lan": params.lan,
+    }
+
+
+def _name_correction_payload(params: NameCorrectionInput) -> dict:
+    """Build the name-correction payload. Deprecated fname/lname inputs are NOT forwarded."""
     return {
         "full_name": params.full_name,
         "day": params.day,
@@ -1390,6 +1419,20 @@ async def divine_name_number(params: NumerologyInput, ctx: Context) -> str:
     """
     api_key, auth_token = _get_credentials(ctx)
     return await _call_divine_api("/numerology/v1/name-number", _numerology_payload(params), API_HOST_7, api_key=api_key, auth_token=auth_token)
+
+
+@mcp.tool(name="divine_name_correction", annotations=TOOL_ANNOTATIONS)
+async def divine_name_correction(params: NameCorrectionInput, ctx: Context) -> str:
+    """Suggest better-aligned spellings of a name using Chaldean numerology.
+
+    Compares your full name's numerology against your birth energy and returns
+    the current name number, life path and birthday numbers, an alignment
+    percentage, the target name number, whether the name is already aligned,
+    and a list of suggested corrected spellings that reach the target number.
+    Takes full_name (not fname/lname). Supports lan 'en' (default) or 'hi'.
+    """
+    api_key, auth_token = _get_credentials(ctx)
+    return await _call_divine_api("/numerology/v1/name-correction", _name_correction_payload(params), API_HOST_7, api_key=api_key, auth_token=auth_token)
 
 
 @mcp.tool(name="divine_birthday_number", annotations=TOOL_ANNOTATIONS)

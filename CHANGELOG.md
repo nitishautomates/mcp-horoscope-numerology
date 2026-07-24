@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.5.0] - 2026-07-24
+
+### Added
+
+- `divine_name_correction` tool for the new Chaldean Numerology Name Correction endpoint (`/numerology/v1/name-correction`, astroapi-7). Takes `full_name` + birth date and returns the current name number, life path and birthday numbers, an alignment percentage, the target name number, whether the name is already aligned, and suggested corrected spellings. Total tools 63 -> 64. This endpoint takes `full_name`, not `fname`/`lname` like its numerology siblings (verified live: fname/lname returns HTTP 422); deprecated fname/lname inputs are accepted but not forwarded.
+
 ## [1.4.2] - 2026-07-08
 
 ### Added

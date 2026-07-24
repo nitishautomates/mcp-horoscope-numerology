@@ -3,13 +3,13 @@
 Official MCP server by Divine API for horoscopes, tarot readings, numerology,
 love calculators, lifestyle insights, and PDF reports.
 
-Provides **63 tools** across these families:
+Provides **64 tools** across these families:
 
 | Family | Tools | Host |
 |--------|-------|------|
 | Horoscopes (daily, weekly, monthly, yearly, Chinese, numerology) | 6 | astroapi-5 |
 | Tarot and readings | 23 | astroapi-5 |
-| Chaldean numerology | 12 | astroapi-7 |
+| Chaldean numerology | 13 | astroapi-7 |
 | Core numbers | 1 | astroapi-4 |
 | Mobile numerology | 2 | astroapi-7 |
 | Calculators (FLAMES, love) | 2 | astroapi-7 |
